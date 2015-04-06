@@ -4,7 +4,7 @@ CXX=clang++
 CXXFLAGS=-std=c++1y -g -Iinclude `pkg-config --cflags opencv`
 LD=clang++
 LDFLAGS=
-LDLIBS=`pkg-config --libs opencv`
+LDLIBS=`pkg-config --libs opencv` `pkg-config --libs sdl2`
 
 SRCS=main.cpp
 OBJS=$(patsubst %.cpp,build/%.o,$(SRCS))

@@ -1,93 +1,120 @@
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
+
+#include <SDL2/SDL.h>
+
 #include <iostream>
 #include <stdio.h>
 
 using namespace cv;
 using namespace std;
 
-const char *window_name = "Viewer";
-
-enum Keys
+void apply(Mat & dst, const Mat & src, Point orig, Point motion)
 {
-    kQ = 1048689,
+    Point2f srcTri[] = { { 0.f, 0.f }, { 0.f, static_cast<float>(src.rows - 1) }, orig };
+    Point2f dstTri[] = { { 0.f, 0.f }, { 0.f, static_cast<float>(src.rows - 1) }, motion };
 
-    kLeft = 1113937,
-    kUp = 1113938,
-    kRight = 1113939,
-    kDown = 1113940
-};
+    Mat m = getAffineTransform(srcTri, dstTri);
 
-void apply(Mat & dst, const Mat & src, double angle, double warp)
-{
-    Point2f srcTri[3];
-    Point2f dstTri[3];
-
-    Mat rot_mat( 2, 3, CV_32FC1 );
-    Mat warp_mat( 2, 3, CV_32FC1 );
-    Mat warp_dst;
-
-    /// Set the dst image the same type and size as src
-    warp_dst = Mat::zeros( src.rows, src.cols, src.type() );
-
-    /// Set your 3 points to calculate the  Affine Transform
-    srcTri[0] = Point2f(0, 0);
-    srcTri[1] = Point2f(src.cols - 1, 0);
-    srcTri[2] = Point2f(0, src.rows - 1);
-
-    dstTri[0] = Point2f(warp, 0);
-    dstTri[1] = Point2f(src.cols - 1, 0);
-    dstTri[2] = Point2f(0, src.rows * warp);
-
-    /// Get the Affine Transform
-    warp_mat = getAffineTransform( srcTri, dstTri );
-
-    /// Apply the Affine Transform just found to the src image
-    warpAffine( src, warp_dst, warp_mat, warp_dst.size() );
-
-    /** Rotating the image after Warp */
-
-    /// Compute a rotation matrix with respect to the center of the image
-    Point center = Point( warp_dst.cols/2, warp_dst.rows/2 );
-    double scale = 1.0;
-
-    /// Get the rotation matrix with the specifications above
-    rot_mat = getRotationMatrix2D( center, angle, scale );
-
-    /// Rotate the warped image
-    warpAffine( warp_dst, dst, rot_mat, warp_dst.size() );
+    warpAffine(src, dst, m, dst.size());
 }
 
-/** @function main */
- int main( int argc, char** argv )
+ int main(int argc, char** argv)
  {
+    if (SDL_Init(SDL_INIT_VIDEO) != 0)
+    {
+        std::cerr << SDL_GetError() << std::endl;
+        return 1;
+    }
+
     Mat src, dst;
 
     src = imread(argv[1], 1);
     dst = src.clone();
+    IplImage img = dst;
 
-    /// Show what you got
-    namedWindow(window_name, CV_WINDOW_AUTOSIZE);
-    imshow(window_name, dst);
+    SDL_Window *wnd = SDL_CreateWindow("Viewer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, img.width, img.height, 0);
+    SDL_Renderer *rdr = SDL_CreateRenderer(wnd, -1, SDL_RENDERER_ACCELERATED);
+    SDL_Texture *texture = SDL_CreateTexture(rdr, SDL_PIXELFORMAT_BGR24, SDL_TEXTUREACCESS_STREAMING, img.width, img.height);
 
-    int key = 0;
-    double angle = 0.0;
-    double warp = 1.0;
+    Point2f orig{ 1.f, 1.f };
+    Point2f motion{ 1.f, 1.f };
+    bool pressed = false;
 
-    while ((key = waitKey(0)) != kQ)
+    for (;;)
     {
-        if (key == kLeft) angle -= 5.0;
-        if (key == kRight) angle += 5.0;
-        if (key == kDown) warp -= 0.1;
-        if (key == kUp) warp += 0.1;
-        if (key == -1) break;
+        SDL_Event event;
+        while (SDL_PollEvent(&event))
+        {
+            switch (event.type)
+            {
+            case SDL_KEYUP:
+                {
+                    switch (event.key.keysym.sym)
+                    {
+                    case SDLK_q:    goto end; break;
+                    }
 
-        warp = std::max(0.1, warp);
+                }
+                break;
 
-        apply(dst, src, angle, warp);
+            case SDL_MOUSEBUTTONDOWN:
+                {
+                    if (event.button.button == SDL_BUTTON_LEFT)
+                    {
+                        orig = Point{event.button.x, event.button.y};
+                        motion = orig;
+                        pressed = true;
+                    }
+                }
+                break;
 
-        imshow(window_name, dst);
+            case SDL_MOUSEBUTTONUP:
+                {
+                    if (event.button.button == SDL_BUTTON_LEFT)
+                    {
+                        orig = { 1.f, 1.f };
+                        motion = { 1.f, 1.f };
+                        pressed = false;
+                    }
+                }
+                break;
+
+            case SDL_MOUSEMOTION:
+                {
+                    if (pressed)
+                    {
+                        motion = Point{event.motion.x, event.motion.y};
+                    }
+                }
+                break;
+
+            case SDL_QUIT:
+                goto end;
+                break;
+            }
+        }
+
+        apply(dst, src, orig, motion);
+
+        int8_t *pixels; int pitch;
+        SDL_LockTexture(texture, nullptr, (void **)&pixels, &pitch);
+        memcpy(pixels, img.imageData, img.imageSize);
+        SDL_UnlockTexture(texture);
+
+        SDL_RenderClear(rdr);
+        SDL_RenderCopy(rdr, texture, nullptr, nullptr);
+        SDL_RenderPresent(rdr);
+
+        SDL_Delay(50);
     }
+
+end:
+    SDL_DestroyTexture(texture);
+    SDL_DestroyRenderer(rdr);
+    SDL_DestroyWindow(wnd);
+
+    SDL_Quit();
 
     return 0;
   }
